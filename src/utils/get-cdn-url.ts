@@ -65,6 +65,49 @@ function createCDNUtil() {
 
   const cdnDatas = flru<CdnUrlData>(200);
 
+  // Manual CDN selection (session-only, never persisted).
+  // When set, it takes precedence over the automatic pickOne-based selection
+  // for all upgcxcode-interchangeable URLs.
+  let manualCdnHost: string | null = null;
+
+  // A sample upgcxcode URL with valid signed params, captured from playinfo.
+  // Swapping its hostname produces a valid URL on bilivideo.com-family CDN hosts,
+  // which is used as the speed test fallback when no per-host signed URL exists.
+  let sampleUpgcxcodeUrl: string | null = null;
+
+  // Latest signed URL per CDN host, rebuilt on every playinfo parse.
+  // Some CDN families (e.g. akamaized) reject URLs signed for other host families,
+  // so manual selection / speed tests should always prefer the host's own signed URL.
+  const signedUrlByHost = new Map<string, string>();
+
+  function applyManualCdnHost(url: string, urlByHost?: Map<string, string>): string {
+    if (manualCdnHost === null) {
+      return url;
+    }
+
+    // Prefer the URL that was actually signed for the manual host (same file)
+    const ownUrl = urlByHost?.get(manualCdnHost);
+    if (ownUrl !== undefined) {
+      return ownUrl;
+    }
+
+    const urlObj = new URL(url);
+    urlObj.hostname = manualCdnHost;
+    return urlObj.href;
+  }
+
+  function createUrlByHostMap(urls: Set<string>): Map<string, string> {
+    const map = new Map<string, string>();
+    urls.forEach((urlStr) => {
+      try {
+        map.set(new URL(urlStr).hostname, urlStr);
+      } catch {
+        // ignore malformed URLs
+      }
+    });
+    return map;
+  }
+
   return {
     saveAndParsePlayerInfo(json: object, meta: string) {
       let dash;
@@ -86,6 +129,9 @@ function createCDNUtil() {
         logger.warn('Invalid Bilibili Playinfo data', { json });
         return;
       }
+
+      // Rebuild the per-host signed URL index for the new playinfo
+      signedUrlByHost.clear();
 
       if ('video' in dash && Array.isArray(dash.video)) {
         extractCDNFromVideoOrAudio(dash.video);
@@ -119,6 +165,35 @@ function createCDNUtil() {
 
       logger.warn('No matching CDN URL Group found! Opt-in basic P2P replacement', { meta, url: urlObj.href, key });
       return basicP2PReplacement(typeof url === 'string' ? new URL(url) : url, meta);
+    },
+    getManualCdnHost(): string | null {
+      return manualCdnHost;
+    },
+    setManualCdnHost(hostname: string | null) {
+      manualCdnHost = hostname;
+      logger.info('Manual CDN selection updated', { manualCdnHost });
+    },
+    getCollectedCdnHosts() {
+      return {
+        mirror: Array.from(mirror_type_upgcxcode_hosts),
+        bcache: Array.from(bcache_type_upgcxcode_hosts)
+      };
+    },
+    getSpeedTestUrlForHost(hostname: string): string | null {
+      // Prefer the host's own signed URL from the latest playinfo --
+      // this is exactly what the manual selection would use
+      const ownUrl = signedUrlByHost.get(hostname);
+      if (ownUrl !== undefined) {
+        return ownUrl;
+      }
+
+      if (sampleUpgcxcodeUrl === null) {
+        return null;
+      }
+
+      const url = new URL(sampleUpgcxcodeUrl);
+      url.hostname = hostname;
+      return url.href;
     }
   };
 
@@ -159,6 +234,14 @@ function createCDNUtil() {
       for (const urlStr of knownUrls) {
         try {
           if (urlStr.includes('/upgcxcode/')) {
+            // Capture a signed URL template for CDN speed tests
+            if (sampleUpgcxcodeUrl === null) {
+              const sampleUrl = new URL(urlStr);
+              sampleUrl.protocol = 'https:';
+              sampleUrl.port = '443';
+              sampleUpgcxcodeUrl = sampleUrl.href;
+            }
+
             if (mirrorRegex.test(urlStr)) {
               const url = new URL(urlStr);
 
@@ -180,6 +263,7 @@ function createCDNUtil() {
                 url.port = '443';
 
                 mirror_urls.add(url.href);
+                signedUrlByHost.set(url.hostname, url.href);
               } else {
                 // Now we know this url is mirror type url, upgcxcode url, and p2p cdn url
                 url.protocol = 'https:';
@@ -220,6 +304,11 @@ function createCDNUtil() {
               bcache_type_upgcxcode_hosts.add(url.hostname);
 
               bcache_urls.add(urlStr);
+
+              const normalizedUrl = new URL(urlStr);
+              normalizedUrl.protocol = 'https:';
+              normalizedUrl.port = '443';
+              signedUrlByHost.set(url.hostname, normalizedUrl.href);
             }
             continue;
           }
@@ -262,12 +351,13 @@ function createCDNUtil() {
 
           replacementType = 'mirror';
 
+          const mirrorUrlByHost = createUrlByHostMap(mirror_urls);
           const mirrorUrlsArray = Array.from(mirror_urls);
           if (mirrorUrlsArray.length === 1) {
-            getReplacementUrl = () => mirrorUrlsArray[0];
+            getReplacementUrl = () => applyManualCdnHost(mirrorUrlsArray[0], mirrorUrlByHost);
             break;
           }
-          getReplacementUrl = () => pickOne(mirrorUrlsArray);
+          getReplacementUrl = () => applyManualCdnHost(pickOne(mirrorUrlsArray), mirrorUrlByHost);
           break;
         }
         // bcache urls are not as good as mirror urls, but still better than p2p cdn,
@@ -277,12 +367,13 @@ function createCDNUtil() {
 
           replacementType = 'bcache';
 
+          const bcacheUrlByHost = createUrlByHostMap(bcache_urls);
           const bcacheUrlsArray = Array.from(bcache_urls);
           if (bcacheUrlsArray.length === 1) {
-            getReplacementUrl = () => bcacheUrlsArray[0];
+            getReplacementUrl = () => applyManualCdnHost(bcacheUrlsArray[0], bcacheUrlByHost);
             break;
           }
-          getReplacementUrl = () => pickOne(bcacheUrlsArray);
+          getReplacementUrl = () => applyManualCdnHost(pickOne(bcacheUrlsArray), bcacheUrlByHost);
           break;
         }
         // Next we try HTTP 302/MCDN upgcxcode urls, since we can replace their
@@ -318,7 +409,7 @@ function createCDNUtil() {
               // need to replace with upgcxcode host
               return replaceUpgcxcodeHost(url);
             }
-            return url.href;
+            return applyManualCdnHost(url.href);
           };
           break;
         }
@@ -370,6 +461,12 @@ function createCDNUtil() {
     const urlObj = typeof url === 'string' ? new URL(url) : url;
     urlObj.protocol = 'https:';
     urlObj.port = '443';
+
+    // Manual CDN selection always wins when set
+    if (manualCdnHost !== null) {
+      urlObj.hostname = manualCdnHost;
+      return urlObj.href;
+    }
 
     if (mirror_type_upgcxcode_hosts.size > 0) {
       const mirror_type_upgcxcode_hosts_array = Array.from(mirror_type_upgcxcode_hosts);

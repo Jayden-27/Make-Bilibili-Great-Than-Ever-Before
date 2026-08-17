@@ -6,6 +6,7 @@ import { getCDNUtil } from '../utils/get-cdn-url';
 import { never } from 'foxts/guard';
 import { createRetrieKeywordFilter } from 'foxts/retrie';
 import { onDOMContentLoaded } from '../utils/on-load-event';
+import { registerCdnSelectorMenu } from '../utils/cdn-selector-panel';
 
 const knownNonVideoPattern = createRetrieKeywordFilter([
   'bilibili.com',
@@ -38,6 +39,8 @@ const noP2P: MakeBilibiliGreatThanEverBeforeModule = {
   name: 'no-p2p',
   description: '防止叔叔用 P2P CDN 省下纸钱',
   any({ onXhrOpen, onBeforeFetch, onXhrResponse }) {
+    registerCdnSelectorMenu();
+
     class MockPCDNLoader { }
 
     class MockBPP2PSDK {
