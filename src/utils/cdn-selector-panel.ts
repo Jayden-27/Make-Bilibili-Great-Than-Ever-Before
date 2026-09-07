@@ -169,7 +169,9 @@ function openCdnSelectorPanel() {
 
   const cdnUtil = getCDNUtil();
   const { mirror, bcache } = cdnUtil.getCollectedCdnHosts();
-  const allHosts = [...mirror, ...bcache];
+  // Only the official mirror sources participate in the speed test;
+  // bcache hosts stay manually selectable but are never tested
+  const testHosts = mirror;
 
   const host = document.createElement('div');
   host.id = PANEL_HOST_ID;
@@ -221,7 +223,7 @@ function openCdnSelectorPanel() {
     logger.info('CDN manually selected', { hostname });
   };
 
-  if (allHosts.length === 0) {
+  if (mirror.length === 0 && bcache.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty';
     empty.textContent = '尚未收集到 CDN 信息，请先开始播放视频后再打开此面板。';
@@ -231,13 +233,13 @@ function openCdnSelectorPanel() {
       list.appendChild(createGroup('官方镜像 CDN（upos mirror，推荐）', mirror, cdnUtil.getManualCdnHost(), onSelect, rowElements));
     }
     if (bcache.length > 0) {
-      list.appendChild(createGroup('自建 CDN 节点（bcache）', bcache, cdnUtil.getManualCdnHost(), onSelect, rowElements));
+      list.appendChild(createGroup('自建 CDN 节点（bcache，不参与测速）', bcache, cdnUtil.getManualCdnHost(), onSelect, rowElements));
     }
   }
 
   const tip = document.createElement('div');
   tip.className = 'tip';
-  tip.textContent = '手动选择对所有可互换的 upgcxcode 视频流生效；纯 IP / mcdn 流不适用，仍走默认的代理兜底。测速会对每个节点做 3 次采样（每次下载约 256KB）取中位数，吞吐量不含连接建立耗时，悬停可查看采样明细，结果仅供参考。选择与测速结果仅保留在当前页面会话中，对之后发起的请求生效，已缓冲内容不受影响。';
+  tip.textContent = '手动选择对所有可互换的 upgcxcode 视频流生效；纯 IP / mcdn 流不适用，仍走默认的代理兜底。测速仅针对官方镜像源，每个节点做 3 次采样取中位数（每次下载最多 1MB 或持续 500ms），吞吐量不含连接建立耗时，悬停可查看采样明细，结果仅供参考。选择与测速结果仅保留在当前页面会话中，对之后发起的请求生效，已缓冲内容不受影响。';
   panel.appendChild(tip);
 
   const footer = document.createElement('div');
@@ -251,7 +253,7 @@ function openCdnSelectorPanel() {
   const testButton = document.createElement('button');
   testButton.className = 'btn';
   testButton.textContent = '开始测速';
-  testButton.disabled = allHosts.length === 0;
+  testButton.disabled = testHosts.length === 0;
 
   const useFastestButton = document.createElement('button');
   useFastestButton.className = 'btn btn-primary hidden';
@@ -293,7 +295,7 @@ function openCdnSelectorPanel() {
   const restoreCachedResults = (): typeof fastest => {
     let best: { hostname: string, result: CdnSpeedTestResult } | null = null;
 
-    allHosts.forEach((hostname) => {
+    testHosts.forEach((hostname) => {
       const cached = getCachedSpeedTestResult(hostname);
       const spans = rowElements.get(hostname);
       if (cached === undefined || spans === undefined) {
@@ -325,9 +327,9 @@ function openCdnSelectorPanel() {
     fastest = null;
 
     try {
-      for (let i = 0, len = allHosts.length; i < len; i++) {
-        const hostname = allHosts[i];
-        testButton.textContent = `测速中 ${i + 1}/${allHosts.length}…`;
+      for (let i = 0, len = testHosts.length; i < len; i++) {
+        const hostname = testHosts[i];
+        testButton.textContent = `测速中 ${i + 1}/${len}…`;
 
         const spans = rowElements.get(hostname);
         if (spans) {

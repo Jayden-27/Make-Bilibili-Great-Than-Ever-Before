@@ -11,7 +11,12 @@ import { logger } from '../logger';
 const nativeFetch = unsafeWindow.fetch;
 
 const SAMPLES_PER_HOST = 3;
-const SAMPLE_BYTES_LIMIT = 256 * 1024; // Download at most 256 KiB per sample
+// Each sample downloads at most 1 MiB and lasts at most 500 ms, whichever comes
+// first: fast hosts get a large enough sample for a stable steady-state reading
+// (TCP slow start ramps down), while slow hosts no longer burn through the whole
+// timeout just to report their actual speed.
+const SAMPLE_BYTES_LIMIT = 1024 * 1024;
+const SAMPLE_TIME_LIMIT_MS = 500;
 const SAMPLE_TIMEOUT_MS = 5000;
 const SAMPLE_INTERVAL_MS = 150;
 
@@ -57,25 +62,23 @@ export function formatOutcome(outcome: CdnSpeedTestOutcome | null): string {
 
 export async function measureCdnHostSpeed(hostname: string, url: string): Promise<CdnSpeedTestOutcome> {
   const samples: CdnSpeedTestSample[] = [];
-  let lastErrorReason = '失败';
 
   for (let i = 0; i < SAMPLES_PER_HOST; i++) {
     try {
       // eslint-disable-next-line no-await-in-loop -- samples must be sequential to avoid self-contention
       samples.push(await measureOnce(url));
     } catch (e) {
-      lastErrorReason = toReason(e);
       logger.debug('CDN speed test sample failed', { hostname, error: e });
+      if (samples.length === 0) {
+        // Fail fast: the very first sample already failed, no point in retrying
+        return cacheOutcome(hostname, { ok: false, reason: toReason(e) });
+      }
     }
 
     if (i + 1 < SAMPLES_PER_HOST) {
       // eslint-disable-next-line no-await-in-loop -- let the torn-down connection settle
       await wait(SAMPLE_INTERVAL_MS);
     }
-  }
-
-  if (samples.length === 0) {
-    return cacheOutcome(hostname, { ok: false, reason: lastErrorReason });
   }
 
   const result: CdnSpeedTestResult = {
@@ -98,19 +101,22 @@ async function measureOnce(url: string): Promise<CdnSpeedTestSample> {
       throw new Error(response.ok ? '失败' : `HTTP ${response.status}`);
     }
 
-    // Read the stream until we have enough bytes, then cancel the rest of the download
+    // Read the stream until one of the limits is reached, then cancel the rest of the download
     const reader = response.body.getReader();
     let bytes = 0;
     let firstChunkAt: number | null = null;
 
     for (;;) {
-      // eslint-disable-next-line no-await-in-loop -- sequential stream read until the byte limit is reached
+      // eslint-disable-next-line no-await-in-loop -- sequential stream read until the limits are reached
       const { done, value } = await reader.read();
       if (done) {
         break;
       }
+      const now = performance.now();
       if (firstChunkAt === null) {
-        firstChunkAt = performance.now();
+        firstChunkAt = now;
+      } else if (now - firstChunkAt >= SAMPLE_TIME_LIMIT_MS) {
+        break;
       }
       bytes += value.byteLength;
       if (bytes >= SAMPLE_BYTES_LIMIT) {
