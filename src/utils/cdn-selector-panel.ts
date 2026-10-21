@@ -1,7 +1,10 @@
 import { logger } from '../logger';
+import { SEED_HOSTS } from '../core/player/candidates';
+import { isAkamaiHost, isMirrorHost, isP2PCDNDomain } from '../core/player/cdn-classify';
+import { getManualCdnHost, setManualCdnHost } from '../core/player/host-model';
+import { getSampleUpgcxcodeKey, upgcxcodeHosts } from '../core/player/registry';
 import type { CdnSpeedTestOutcome, CdnSpeedTestResult } from './cdn-speed-test';
 import { formatOutcome, formatSpeed, getCachedSpeedTestResult, measureCdnHostSpeed } from './cdn-speed-test';
-import { getCDNUtil } from './get-cdn-url';
 import { onDOMContentLoaded } from './on-load-event';
 import { wait } from 'foxts/wait';
 
@@ -167,11 +170,11 @@ function openCdnSelectorPanel() {
     return;
   }
 
-  const cdnUtil = getCDNUtil();
-  const { mirror, bcache } = cdnUtil.getCollectedCdnHosts();
+  const { mirror, bcache } = collectedCdnHosts();
   // Only the official mirror sources participate in the speed test;
   // bcache hosts stay manually selectable but are never tested
   const testHosts = mirror;
+  const speedTestAvailable = getSampleUpgcxcodeKey() !== null;
 
   const host = document.createElement('div');
   host.id = PANEL_HOST_ID;
@@ -203,7 +206,7 @@ function openCdnSelectorPanel() {
   const status = document.createElement('div');
   status.className = 'status';
   const updateStatus = () => {
-    const selected = cdnUtil.getManualCdnHost();
+    const selected = getManualCdnHost();
     status.textContent = selected === null
       ? '当前模式：自动（默认选择逻辑）'
       : `当前模式：手动（${selected}）`;
@@ -218,7 +221,7 @@ function openCdnSelectorPanel() {
   const rowElements = new Map<string, RowElements>();
 
   const onSelect = (hostname: string) => {
-    cdnUtil.setManualCdnHost(hostname);
+    setManualCdnHost(hostname);
     updateStatus();
     logger.info('CDN manually selected', { hostname });
   };
@@ -230,16 +233,16 @@ function openCdnSelectorPanel() {
     list.appendChild(empty);
   } else {
     if (mirror.length > 0) {
-      list.appendChild(createGroup('官方镜像 CDN（upos mirror，推荐）', mirror, cdnUtil.getManualCdnHost(), onSelect, rowElements));
+      list.appendChild(createGroup('官方镜像 CDN（upos mirror，推荐）', mirror, getManualCdnHost(), onSelect, rowElements));
     }
     if (bcache.length > 0) {
-      list.appendChild(createGroup('自建 CDN 节点（bcache，不参与测速）', bcache, cdnUtil.getManualCdnHost(), onSelect, rowElements));
+      list.appendChild(createGroup('自建 CDN 节点（bcache，不参与测速）', bcache, getManualCdnHost(), onSelect, rowElements));
     }
   }
 
   const tip = document.createElement('div');
   tip.className = 'tip';
-  tip.textContent = '手动选择对所有可互换的 upgcxcode 视频流生效；纯 IP / mcdn 流不适用，仍走默认的代理兜底。测速仅针对官方镜像源，每个节点做 3 次采样取中位数（每次下载最多 1MB 或持续 500ms），吞吐量不含连接建立耗时，悬停可查看采样明细，结果仅供参考。选择与测速结果仅保留在当前页面会话中，对之后发起的请求生效，已缓冲内容不受影响。';
+  tip.textContent = '手动选择对所有可互换的 upgcxcode 视频流生效；纯 IP / mcdn 流不适用，仍走默认的代理兜底。开启「多 CDN 分片并发」模块时，视频分片仍会并发使用多个节点。测速仅针对官方镜像源，每个节点做 3 次采样取中位数（每次下载最多 1MB 或持续 500ms），吞吐量不含连接建立耗时，悬停可查看采样明细，结果仅供参考。选择与测速结果仅保留在当前页面会话中，对之后发起的请求生效，已缓冲内容不受影响。';
   panel.appendChild(tip);
 
   const footer = document.createElement('div');
@@ -253,7 +256,7 @@ function openCdnSelectorPanel() {
   const testButton = document.createElement('button');
   testButton.className = 'btn';
   testButton.textContent = '开始测速';
-  testButton.disabled = testHosts.length === 0;
+  testButton.disabled = testHosts.length === 0 || !speedTestAvailable;
 
   const useFastestButton = document.createElement('button');
   useFastestButton.className = 'btn btn-primary hidden';
@@ -263,7 +266,7 @@ function openCdnSelectorPanel() {
   resetButton.className = 'btn';
   resetButton.textContent = '恢复自动';
   resetButton.addEventListener('click', () => {
-    cdnUtil.setManualCdnHost(null);
+    setManualCdnHost(null);
     updateStatus();
     const checkedRadio = list.querySelector<HTMLInputElement>('input[type="radio"]:checked');
     if (checkedRadio !== null) {
@@ -337,7 +340,7 @@ function openCdnSelectorPanel() {
           spans.speed.textContent = '测速中…';
         }
 
-        const testUrl = cdnUtil.getSpeedTestUrlForHost(hostname);
+        const testUrl = speedTestUrlForHost(hostname);
         // eslint-disable-next-line no-await-in-loop -- hosts are tested sequentially to avoid bandwidth contention
         const outcome = testUrl === null ? null : await measureCdnHostSpeed(hostname, testUrl);
 
@@ -399,6 +402,32 @@ function openCdnSelectorPanel() {
   document.addEventListener('keydown', onKeydown);
 
   document.body.appendChild(host);
+}
+
+/** Every host an upgcxcode signature can be moved onto, as `candidates.ts` sees them */
+function collectedCdnHosts() {
+  const hostnames = new Set<string>(upgcxcodeHosts);
+  for (let i = 0, len = SEED_HOSTS.length; i < len; i++) {
+    hostnames.add(SEED_HOSTS[i]);
+  }
+
+  const mirror: string[] = [];
+  const bcache: string[] = [];
+  for (const hostname of hostnames) {
+    if (isP2PCDNDomain(hostname) || isAkamaiHost(hostname)) {
+      continue;
+    }
+    (isMirrorHost(hostname) ? mirror : bcache).push(hostname);
+  }
+  mirror.sort();
+  bcache.sort();
+  return { mirror, bcache };
+}
+
+/** A signed upgcxcode path is valid on any of these hosts */
+function speedTestUrlForHost(hostname: string) {
+  const key = getSampleUpgcxcodeKey();
+  return key === null ? null : `https://${hostname}${key}`;
 }
 
 function createGroup(title: string, hostnames: string[], current: string | null, onSelect: (hostname: string) => void, rowElements: Map<string, RowElements>) {

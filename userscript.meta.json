@@ -1,4 +1,5 @@
 {
+  "$schema": "https://cdn.jsdelivr.net/npm/rollup-plugin-userscript-metablock@latest/userscript-metadata.schema.json",
   "name": "Make Bilibili Great Than Ever Before (Jayden)",
   "namespace": "https://github.com/Jayden-27/Make-Bilibili-Great-Than-Ever-Before",
   "grant": [
