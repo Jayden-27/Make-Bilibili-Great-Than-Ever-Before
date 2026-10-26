@@ -14,6 +14,7 @@ const knownP2pCdnDomainPattern = createRetrieKeywordFilter([
   'szbdyd.com',
   '.nexusedgeio.com',
   '.ahdohpiechei.com', // 七牛云 PCDN
+  '.mountaintoys.cn', // 新型 PCDN，见 upstream issue #26
 
   'upos-sz-mirror14b.bilivideo.com' // mirror type, upgcxcode, but it has no valid SSL cert, its SSL cert is for PCDN (*.bilivideo.cn)
 ]);
@@ -74,16 +75,15 @@ export type CdnUrlClass = 'mirror' | 'bcache' | 'mcdn-upgcxcode' | 'mcdn-tf' | '
 export function classifyCdnUrl(url: ReadonlyURL): CdnUrlClass {
   const href = url.href;
   if (href.includes('/upgcxcode/')) {
-    if (mirrorRegex.test(href)) {
-      // It is possible for a mirror type url to also be a p2p cdn:
-      //
-      // upos-sz-mirrorcoso1.bilivideo.com os=mcdn
-      // upos-*-302.bilivideo.com (HTTP 302 p2p cdn)
-      return url.searchParams.get('os') !== 'mcdn' && !isP2PCDNDomain(url.hostname)
-        ? 'mirror'
-        : 'mcdn-upgcxcode';
+    // `os=mcdn` marks a PCDN signature even on a host not on the list yet:
+    //
+    // upos-sz-mirrorcoso1.bilivideo.com os=mcdn
+    // upos-*-302.bilivideo.com (HTTP 302 p2p cdn)
+    // *.edge.mountaintoys.cn os=mcdn (see upstream issue #26)
+    if (isP2PCDNDomain(url.hostname) || url.searchParams.get('os') === 'mcdn') {
+      return 'mcdn-upgcxcode';
     }
-    return isP2PCDNDomain(url.hostname) ? 'mcdn-upgcxcode' : 'bcache';
+    return mirrorRegex.test(href) ? 'mirror' : 'bcache';
   }
   if (mCdnTfRegex.test(href)) {
     return 'mcdn-tf';

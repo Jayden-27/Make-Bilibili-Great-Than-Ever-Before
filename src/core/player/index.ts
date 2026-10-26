@@ -136,7 +136,7 @@ function route(url: string | ReadonlyURL, via: string): string | null {
     && (manualHost === null || requested.hostname === manualHost)
     && isCandidateUsable(requested, file, now, Date.now() / 1000)
     && !hosts.isCoolingDown(requested.hostname, now);
-  const chosen = keep ? requested : (defaultCandidate(candidates, file, now) ?? requested);
+  const chosen = keep ? requested : (defaultCandidate(candidates, file, now, address.key) ?? requested);
   if (chosen === null) {
     logger.warn('[player-interceptor] no acceptable URL for a media request, left as is', { via, url: href });
     return null;

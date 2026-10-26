@@ -132,8 +132,10 @@ export function findCandidate(candidates: readonly MediaCandidate[], address: Me
 /**
  * A usable candidate of the lowest tier, at random, on a host not cooling down if there is one:
  * what the browser fetches when the requested URL is not acceptable
+ *
+ * @param preferredKey the requested URL's signature, kept when a manually selected host can serve it
  */
-export function defaultCandidate(candidates: readonly MediaCandidate[], file: MediaFile | null, now: number): MediaCandidate | null {
+export function defaultCandidate(candidates: readonly MediaCandidate[], file: MediaFile | null, now: number, preferredKey: string | null = null): MediaCandidate | null {
   const nowSec = Date.now() / 1000;
   const usable = candidates.filter(candidate => isCandidateUsable(candidate, file, now, nowSec));
   const available = usable.filter(candidate => !isCoolingDown(candidate.hostname, now));
@@ -143,7 +145,22 @@ export function defaultCandidate(candidates: readonly MediaCandidate[], file: Me
   if (manualHost !== null) {
     const pinned = options.filter(candidate => candidate.hostname === manualHost);
     if (pinned.length > 0) {
-      return pickOne(pinned);
+      // Keep the requested signature when the pinned host serves it
+      if (preferredKey !== null) {
+        for (let i = 0, len = pinned.length; i < len; i++) {
+          if (pinned[i].key === preferredKey) {
+            return pinned[i];
+          }
+        }
+      }
+      // Prefer the host's own (listed) signature over one moved from another host
+      let tier = pinned[0].tier;
+      for (let i = 1, len = pinned.length; i < len; i++) {
+        if (pinned[i].tier < tier) {
+          tier = pinned[i].tier;
+        }
+      }
+      return pickOne(pinned.filter(candidate => candidate.tier === tier));
     }
   }
 
