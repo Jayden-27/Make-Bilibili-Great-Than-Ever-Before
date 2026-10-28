@@ -74,6 +74,14 @@ export type CdnUrlClass = 'mirror' | 'bcache' | 'mcdn-upgcxcode' | 'mcdn-tf' | '
 
 export function classifyCdnUrl(url: ReadonlyURL): CdnUrlClass {
   const href = url.href;
+  // `/v1/resource` paths are not interchangeable: only the proxy can fetch them, so they must
+  // not be moved onto an upgcxcode host (a moved path answers 403)
+  if (
+    mCdnTfRegex.test(href)
+    || (url.pathname.includes('/v1/resource') && (isP2PCDNDomain(url.hostname) || url.searchParams.get('os') === 'mcdn'))
+  ) {
+    return 'mcdn-tf';
+  }
   if (href.includes('/upgcxcode/')) {
     // `os=mcdn` marks a PCDN signature even on a host not on the list yet:
     //
@@ -84,9 +92,6 @@ export function classifyCdnUrl(url: ReadonlyURL): CdnUrlClass {
       return 'mcdn-upgcxcode';
     }
     return mirrorRegex.test(href) ? 'mirror' : 'bcache';
-  }
-  if (mCdnTfRegex.test(href)) {
-    return 'mcdn-tf';
   }
   if (href.includes('szbdyd.com')) {
     return 'szbdyd';

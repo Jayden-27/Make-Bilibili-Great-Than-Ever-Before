@@ -2,6 +2,7 @@ import { noop } from 'foxts/noop';
 import type { MakeBilibiliGreatThanEverBeforeModule } from '../types';
 import { defineReadonlyProperty } from '../utils/define-readonly-property';
 import { registerCdnSelectorMenu } from '../utils/cdn-selector-panel';
+import { restoreCdnPreference } from '../utils/cdn-preference';
 import { noP2PPolicy } from './no-p2p/policy';
 
 /**
@@ -13,6 +14,7 @@ const noP2P: MakeBilibiliGreatThanEverBeforeModule = {
   description: '防止叔叔用 P2P CDN 省下纸钱',
   any({ player }) {
     registerCdnSelectorMenu();
+    restoreCdnPreference();
 
     class MockPCDNLoader { }
 

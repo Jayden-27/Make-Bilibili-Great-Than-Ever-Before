@@ -842,6 +842,19 @@ export function createThreadRipper(player: MakeBilibiliGreatThanEverBeforeHook['
     const dup = racer !== null;
     const hosts = hostsOf(job, bytes, performance.now());
     const owners = dup || job.cls === RELAXED ? null : ownersOf(hosts);
+
+    // A manually selected host carries primaries while it is unmeasured or within the owners'
+    // speed band; once measured slower it only races, so a stale preference cannot stall a piece
+    if (!dup && job.cls !== RELAXED) {
+      const manualHost = model.getManualCdnHost();
+      if (manualHost !== null && !seg.tried.has(manualHost)) {
+        const pinned = hosts.find(option => option.hostname === manualHost && option.active < HOST_CAP);
+        if (pinned !== undefined && (!pinned.estimate.measured || owners?.has(pinned.hostname))) {
+          return pinned;
+        }
+      }
+    }
+
     const all = eligible(hosts, dup ? seg : null, owners);
     const untried = all.filter(option => !seg.tried.has(option.hostname));
     const options = untried.length === 0 ? all : untried;

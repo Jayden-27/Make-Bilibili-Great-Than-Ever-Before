@@ -1,8 +1,10 @@
 import { logger } from '../logger';
 import { SEED_HOSTS } from '../core/player/candidates';
 import { isAkamaiHost, isMirrorHost, isP2PCDNDomain } from '../core/player/cdn-classify';
-import { getManualCdnHost, setManualCdnHost } from '../core/player/host-model';
+import { getManualCdnHost } from '../core/player/host-model';
 import { getSampleUpgcxcodeKey, upgcxcodeHosts } from '../core/player/registry';
+import type { CdnPreferenceSource } from './cdn-preference';
+import { forgetCdnPreference, getRememberedCdnHost, rememberCdnHost } from './cdn-preference';
 import type { CdnSpeedTestOutcome, CdnSpeedTestResult } from './cdn-speed-test';
 import { formatOutcome, formatSpeed, getCachedSpeedTestResult, measureCdnHostSpeed } from './cdn-speed-test';
 import { onDOMContentLoaded } from './on-load-event';
@@ -207,9 +209,10 @@ function openCdnSelectorPanel() {
   status.className = 'status';
   const updateStatus = () => {
     const selected = getManualCdnHost();
+    const remembered = getRememberedCdnHost();
     status.textContent = selected === null
       ? '当前模式：自动（默认选择逻辑）'
-      : `当前模式：手动（${selected}）`;
+      : `当前模式：手动（${selected}${remembered === selected ? '，已记住' : ''}）`;
   };
   updateStatus();
   panel.appendChild(status);
@@ -220,10 +223,10 @@ function openCdnSelectorPanel() {
 
   const rowElements = new Map<string, RowElements>();
 
-  const onSelect = (hostname: string) => {
-    setManualCdnHost(hostname);
+  const onSelect = (hostname: string, source: CdnPreferenceSource = 'manual') => {
+    rememberCdnHost(hostname, source);
     updateStatus();
-    logger.info('CDN manually selected', { hostname });
+    logger.info('CDN manually selected', { hostname, source });
   };
 
   if (mirror.length === 0 && bcache.length === 0) {
@@ -242,7 +245,7 @@ function openCdnSelectorPanel() {
 
   const tip = document.createElement('div');
   tip.className = 'tip';
-  tip.textContent = '手动选择对所有可互换的 upgcxcode 视频流生效；纯 IP / mcdn 流不适用，仍走默认的代理兜底。开启「多 CDN 分片并发」模块时，视频分片仍会并发使用多个节点。测速仅针对官方镜像源，每个节点做 3 次采样取中位数（每次下载最多 1MB 或持续 500ms），吞吐量不含连接建立耗时，悬停可查看采样明细，结果仅供参考。选择与测速结果仅保留在当前页面会话中，对之后发起的请求生效，已缓冲内容不受影响。';
+  tip.textContent = '手动选择对所有可互换的 upgcxcode 视频流生效；纯 IP / mcdn 流不适用，仍走默认的代理兜底。选择会保存在本机（30 天有效），下次打开 B 站继续生效；开启「多 CDN 分片并发」时该节点优先，其他节点自动兜底，节点明显变慢时会自动降级。测速仅针对官方镜像源，每个节点做 3 次采样取中位数（每次下载最多 1MB 或持续 500ms），吞吐量不含连接建立耗时，悬停可查看采样明细，结果仅供参考。测速结果仅保留在当前页面会话中，点「恢复自动」可清除已记住的节点。';
   panel.appendChild(tip);
 
   const footer = document.createElement('div');
@@ -266,7 +269,7 @@ function openCdnSelectorPanel() {
   resetButton.className = 'btn';
   resetButton.textContent = '恢复自动';
   resetButton.addEventListener('click', () => {
-    setManualCdnHost(null);
+    forgetCdnPreference();
     updateStatus();
     const checkedRadio = list.querySelector<HTMLInputElement>('input[type="radio"]:checked');
     if (checkedRadio !== null) {
@@ -375,7 +378,7 @@ function openCdnSelectorPanel() {
       return;
     }
     const hostname = fastest.hostname;
-    onSelect(hostname);
+    onSelect(hostname, 'fastest');
 
     const radio = list.querySelector<HTMLInputElement>(`input[name="mbgtbe-cdn-host"][value="${CSS.escape(hostname)}"]`);
     if (radio !== null) {
@@ -409,6 +412,11 @@ function collectedCdnHosts() {
   const hostnames = new Set<string>(upgcxcodeHosts);
   for (let i = 0, len = SEED_HOSTS.length; i < len; i++) {
     hostnames.add(SEED_HOSTS[i]);
+  }
+  // A remembered host may not be offered by the current playinfo: keep it selectable
+  const selected = getManualCdnHost();
+  if (selected !== null) {
+    hostnames.add(selected);
   }
 
   const mirror: string[] = [];

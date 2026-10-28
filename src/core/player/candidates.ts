@@ -99,7 +99,7 @@ export function mediaCandidates(requested: MediaAddress | null, file: MediaFile 
     add(asListed(source));
 
     const { key } = source;
-    if (source.pathname.includes('/upgcxcode/') && !isAkamaiHost(source.hostname) && !moved.has(key)) {
+    if (source.pathname.includes('/upgcxcode/') && source.class !== 'mcdn-tf' && !isAkamaiHost(source.hostname) && !moved.has(key)) {
       moved.add(key);
       for (let j = 0, count = upgcxcodeHosts.length; j < count; j++) {
         const hostname = upgcxcodeHosts[j];
@@ -186,6 +186,13 @@ function upgcxcodeHostsOf(file: MediaFile | null) {
   }
   for (const hostname of upgcxcodeHosts) names.add(hostname);
   addArrayElementsToSet(names, SEED_HOSTS);
+
+  // A remembered host may not be listed by this playinfo: keep its signatures available
+  const manualHost = getManualCdnHost();
+  if (manualHost !== null) {
+    names.add(manualHost);
+  }
+
   return Array.from(names).filter(hostname => !isP2PCDNDomain(hostname) && !isAkamaiHost(hostname));
 }
 
