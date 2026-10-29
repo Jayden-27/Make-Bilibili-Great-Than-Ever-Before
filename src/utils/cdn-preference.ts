@@ -4,7 +4,6 @@ import { logger } from '../logger';
 import { isObject } from './is-object';
 
 const PREFERENCE_KEY = 'mbgtbe:cdn-preference:v1';
-const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const HOSTNAME_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
 export type CdnPreferenceSource = 'manual' | 'fastest';
@@ -69,19 +68,16 @@ function readPreference(): CdnPreference | null {
   }
 
   const { host, savedAt, source } = raw as Partial<CdnPreference>;
-  if (
-    typeof host !== 'string'
-    || typeof savedAt !== 'number'
-    || !Number.isFinite(savedAt)
-    || savedAt <= 0
-    || !isValidHost(host)
-    || Date.now() - savedAt > MAX_AGE_MS
-  ) {
+  if (typeof host !== 'string' || !isValidHost(host)) {
     removePreference();
     return null;
   }
 
-  return { host, savedAt, source: source === 'fastest' ? 'fastest' : 'manual' };
+  return {
+    host,
+    savedAt: typeof savedAt === 'number' && Number.isFinite(savedAt) && savedAt > 0 ? savedAt : Date.now(),
+    source: source === 'fastest' ? 'fastest' : 'manual'
+  };
 }
 
 /** Apply the stored preference before no-p2p registers its policy */

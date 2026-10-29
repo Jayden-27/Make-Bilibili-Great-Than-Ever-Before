@@ -3,6 +3,7 @@ import { SEED_HOSTS } from '../core/player/candidates';
 import { isAkamaiHost, isMirrorHost, isP2PCDNDomain } from '../core/player/cdn-classify';
 import { getManualCdnHost } from '../core/player/host-model';
 import { getSampleUpgcxcodeKey, upgcxcodeHosts } from '../core/player/registry';
+import { cdnVendorOf } from './cdn-vendor';
 import type { CdnPreferenceSource } from './cdn-preference';
 import { forgetCdnPreference, getRememberedCdnHost, rememberCdnHost } from './cdn-preference';
 import type { CdnSpeedTestOutcome, CdnSpeedTestResult } from './cdn-speed-test';
@@ -80,6 +81,11 @@ const PANEL_CSS = `
     font-family: ui-monospace, monospace;
     font-size: 13px;
     word-break: break-all;
+  }
+  .vendor {
+    font-size: 12px;
+    color: #9499a0;
+    white-space: nowrap;
   }
   .badge {
     padding: 0 4px;
@@ -245,7 +251,7 @@ function openCdnSelectorPanel() {
 
   const tip = document.createElement('div');
   tip.className = 'tip';
-  tip.textContent = '手动选择对所有可互换的 upgcxcode 视频流生效；纯 IP / mcdn 流不适用，仍走默认的代理兜底。选择会保存在本机（30 天有效），下次打开 B 站继续生效；开启「多 CDN 分片并发」时该节点优先，其他节点自动兜底，节点明显变慢时会自动降级。测速仅针对官方镜像源，每个节点做 3 次采样取中位数（每次下载最多 1MB 或持续 500ms），吞吐量不含连接建立耗时，悬停可查看采样明细，结果仅供参考。测速结果仅保留在当前页面会话中，点「恢复自动」可清除已记住的节点。';
+  tip.textContent = '手动选择对所有可互换的 upgcxcode 视频流生效；纯 IP / mcdn 流不适用，仍走默认的代理兜底。选择会长期保存在本机，下次打开 B 站继续生效；开启「多 CDN 分片并发」时该节点优先，其他节点自动兜底，节点明显变慢时会自动降级。测速仅针对官方镜像源，每个节点做 3 次采样取中位数（每次下载最多 1MB 或持续 500ms），吞吐量不含连接建立耗时，悬停可查看采样明细，结果仅供参考。测速结果仅保留在当前页面会话中，点「恢复自动」可清除已记住的节点。';
   panel.appendChild(tip);
 
   const footer = document.createElement('div');
@@ -466,6 +472,14 @@ function createGroup(title: string, hostnames: string[], current: string | null,
     name.className = 'hostname';
     name.textContent = hostname;
 
+    const vendorName = cdnVendorOf(hostname);
+    let vendor: HTMLElement | null = null;
+    if (vendorName !== null) {
+      vendor = document.createElement('span');
+      vendor.className = 'vendor';
+      vendor.textContent = vendorName;
+    }
+
     const badge = document.createElement('span');
     badge.className = 'badge hidden';
     badge.textContent = '推荐';
@@ -475,6 +489,9 @@ function createGroup(title: string, hostnames: string[], current: string | null,
 
     label.appendChild(radio);
     label.appendChild(name);
+    if (vendor !== null) {
+      label.appendChild(vendor);
+    }
     label.appendChild(badge);
     label.appendChild(speed);
     group.appendChild(label);
