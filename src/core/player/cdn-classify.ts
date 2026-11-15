@@ -15,6 +15,7 @@ const knownP2pCdnDomainPattern = createRetrieKeywordFilter([
   '.nexusedgeio.com',
   '.ahdohpiechei.com', // 七牛云 PCDN
   '.mountaintoys.cn', // 新型 PCDN，见 upstream issue #26
+  '.bvmlt.top',
 
   'upos-sz-mirror14b.bilivideo.com' // mirror type, upgcxcode, but it has no valid SSL cert, its SSL cert is for PCDN (*.bilivideo.cn)
 ]);
@@ -67,19 +68,21 @@ export function isKnownNonVideoUrl(url: string | ReadonlyURL): boolean {
  *   details in https://rec.danmuji.org/dev/cdn-info/ )
  * - `mcdn-upgcxcode`: P2P CDN serving an upgcxcode path (`*.mcdn.bilivideo.*`, HTTP 302 P2P CDN,
  *   mirror with `os=mcdn`): the path works on any upgcxcode host
- * - `mcdn-tf`: pure IP / mcdn CDN with its own `/v1/resource` path
+ * - `mcdn-tf`: pure IP / mcdn CDN with its own `/v1/resource` path, an upgcxcode one inside
+ *   included (`/v1/resource/upgcxcode/...`): it is signed for that host alone, every other host
+ *   answers 403
  * - `szbdyd`: deprecated PCDN, the real host is in `xy_usource`
  */
 export type CdnUrlClass = 'mirror' | 'bcache' | 'mcdn-upgcxcode' | 'mcdn-tf' | 'szbdyd' | 'unknown';
 
 export function classifyCdnUrl(url: ReadonlyURL): CdnUrlClass {
   const href = url.href;
+  if (mCdnTfRegex.test(href)) {
+    return 'mcdn-tf';
+  }
   // `/v1/resource` paths are not interchangeable: only the proxy can fetch them, so they must
   // not be moved onto an upgcxcode host (a moved path answers 403)
-  if (
-    mCdnTfRegex.test(href)
-    || (url.pathname.includes('/v1/resource') && (isP2PCDNDomain(url.hostname) || url.searchParams.get('os') === 'mcdn'))
-  ) {
+  if (url.pathname.includes('/v1/resource') && (isP2PCDNDomain(url.hostname) || url.searchParams.get('os') === 'mcdn')) {
     return 'mcdn-tf';
   }
   if (href.includes('/upgcxcode/')) {
