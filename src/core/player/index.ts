@@ -13,6 +13,7 @@
 
 import { never } from 'foxts/guard';
 import { logger } from '../../logger';
+import { noteRoutedHost } from '../../utils/player-info-sync';
 import type { ReadonlyURL } from '../../utils/readonly-url';
 import type { MakeBilibiliGreatThanEverBeforeHook, XhrResponder, XhrSendContext } from '../../types';
 import { isKnownNonVideoUrl } from './cdn-classify';
@@ -140,6 +141,9 @@ function route(url: string | ReadonlyURL, via: string): string | null {
   if (chosen === null) {
     logger.warn('[player-interceptor] no acceptable URL for a media request, left as is', { via, url: href });
     return null;
+  }
+  if (file !== null) {
+    noteRoutedHost(file.kind, chosen.hostname);
   }
   return chosen.href === href ? null : chosen.href;
 }

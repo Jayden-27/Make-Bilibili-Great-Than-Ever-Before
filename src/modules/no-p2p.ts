@@ -3,6 +3,7 @@ import type { MakeBilibiliGreatThanEverBeforeModule } from '../types';
 import { defineReadonlyProperty } from '../utils/define-readonly-property';
 import { registerCdnSelectorMenu } from '../utils/cdn-selector-panel';
 import { restoreCdnPreference } from '../utils/cdn-preference';
+import { startPlayerInfoPanelSync } from '../utils/player-info-sync';
 import { noP2PPolicy } from './no-p2p/policy';
 
 /**
@@ -15,6 +16,7 @@ const noP2P: MakeBilibiliGreatThanEverBeforeModule = {
   any({ player }) {
     registerCdnSelectorMenu();
     restoreCdnPreference();
+    startPlayerInfoPanelSync();
 
     class MockPCDNLoader { }
 
